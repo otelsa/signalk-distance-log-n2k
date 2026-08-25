@@ -1,0 +1,23 @@
+{
+  "name": "signalk-distance-log-n2k",
+  "version": "0.2.0",
+  "description": "Emit NMEA 2000 PGN 128275 Distance Log from Signal K navigation.log and navigation.trip.log",
+  "main": "index.js",
+  "scripts": {
+    "test": "node --check index.js && node test/smoke.js"
+  },
+  "keywords": [
+    "signalk-node-server-plugin",
+    "signalk",
+    "nmea2000",
+    "pgn128275"
+  ],
+  "engines": {
+    "node": ">=16"
+  },
+  "repository": {
+    "type": "git",
+    "url": "ssh://git@git.otelsa.de:2222/alphapi/signalk-distance-log-n2k.git"
+  },
+  "license": "MIT"
+}
