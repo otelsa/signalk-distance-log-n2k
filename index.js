@@ -1,6 +1,8 @@
 module.exports = function (app) {
   const plugin = {}
   const MAX_N2K_DISTANCE_METERS = 4294967292
+  const FIELD_LOG = 'Log'
+  const FIELD_TRIP_LOG = 'Trip Log'
 
   plugin.id = 'signalk-distance-log-n2k'
   plugin.name = 'Distance Log to NMEA 2000'
@@ -17,7 +19,8 @@ module.exports = function (app) {
         type: 'number',
         title: 'Update interval in milliseconds',
         default: 1000,
-        minimum: 250
+        minimum: 250,
+        maximum: 60000
       },
       sendLog: {
         type: 'boolean',
@@ -56,14 +59,7 @@ module.exports = function (app) {
   }
 
   function normalizeOptions (options) {
-    const opts = Object.assign({
-      intervalMs: 1000,
-      sendLog: true,
-      sendTripLog: false,
-      includeDateTime: true,
-      sendOnlyOnChange: false,
-      minChangeMeters: 1
-    }, options || {})
+    const opts = options || {}
 
     return {
       intervalMs: clampNumber(opts.intervalMs, 250, 60000, 1000),
@@ -109,50 +105,51 @@ module.exports = function (app) {
       return true
     }
 
-    const changed = ['Log', 'Trip Log'].some((field) => {
+    const changed = [FIELD_LOG, FIELD_TRIP_LOG].some((field) => {
       if (typeof fields[field] !== 'number') {
         return false
       }
       if (typeof lastPayload[field] !== 'number') {
         return true
       }
-      return Math.abs(fields[field] - lastPayload[field]) >= options.minChangeMeters
+      return fields[field] !== lastPayload[field] &&
+        Math.abs(fields[field] - lastPayload[field]) >= options.minChangeMeters
     })
 
     return changed
   }
 
   function sendDistanceLog (options) {
-    const fields = {}
-
-    if (options.includeDateTime) {
-      Object.assign(fields, getDateTimeFields())
-    }
-
-    if (options.sendLog) {
-      const log = toN2kDistance(getPathValue('navigation.log'))
-      if (log !== null) {
-        fields.Log = log
-      }
-    }
-
-    if (options.sendTripLog) {
-      const tripLog = toN2kDistance(getPathValue('navigation.trip.log'))
-      if (tripLog !== null) {
-        fields['Trip Log'] = tripLog
-      }
-    }
-
-    if (typeof fields.Log !== 'number' && typeof fields['Trip Log'] !== 'number') {
-      app.debug('No valid log values available, not sending PGN 128275')
-      return
-    }
-
-    if (!shouldSend(fields, options)) {
-      return
-    }
-
     try {
+      const fields = {}
+
+      if (options.includeDateTime) {
+        Object.assign(fields, getDateTimeFields())
+      }
+
+      if (options.sendLog) {
+        const log = toN2kDistance(getPathValue('navigation.log'))
+        if (log !== null) {
+          fields[FIELD_LOG] = log
+        }
+      }
+
+      if (options.sendTripLog) {
+        const tripLog = toN2kDistance(getPathValue('navigation.trip.log'))
+        if (tripLog !== null) {
+          fields[FIELD_TRIP_LOG] = tripLog
+        }
+      }
+
+      if (typeof fields[FIELD_LOG] !== 'number' && typeof fields[FIELD_TRIP_LOG] !== 'number') {
+        app.debug('No valid log values available, not sending PGN 128275')
+        return true
+      }
+
+      if (!shouldSend(fields, options)) {
+        return true
+      }
+
       app.emit('nmea2000JsonOut', {
         pgn: 128275,
         prio: 6,
@@ -161,10 +158,12 @@ module.exports = function (app) {
       })
       lastPayload = fields
 
-      app.debug(`Sent PGN 128275: ${JSON.stringify(fields)}`)
+      app.debug('Sent PGN 128275:', fields)
+      return true
     } catch (err) {
       app.setPluginError(`Failed to send PGN 128275: ${err.message}`)
       app.error(err)
+      return false
     }
   }
 
@@ -172,14 +171,15 @@ module.exports = function (app) {
     plugin.stop()
 
     const opts = normalizeOptions(options)
-    lastPayload = null
 
     timer = setInterval(() => sendDistanceLog(opts), opts.intervalMs)
-    sendDistanceLog(opts)
+    const initialSendOk = sendDistanceLog(opts)
 
-    app.setPluginStatus(
-      `Sending PGN 128275 every ${opts.intervalMs} ms; Log=${opts.sendLog}; Trip Log=${opts.sendTripLog}`
-    )
+    if (initialSendOk) {
+      app.setPluginStatus(
+        `Sending PGN 128275 every ${opts.intervalMs} ms; Log=${opts.sendLog}; Trip Log=${opts.sendTripLog}`
+      )
+    }
   }
 
   plugin.stop = function () {
